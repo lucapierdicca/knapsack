@@ -3,9 +3,10 @@ import pygad
 from pprint import pprint
 import random
 
+# read data
 products = np.genfromtxt("products.csv", delimiter=',', dtype=None, encoding=None)
 
-# data
+# problem data
 lbl = products[1:,0]
 num_genes = len(lbl)
 id = np.arange(num_genes)
@@ -15,11 +16,33 @@ quantity_max = products[1:,3].astype(int)
 space_max = 1
 
 
-def fitness(solution, solution_index):
+def fitness_single_repair(solution, solution_index):
     return np.sum(solution * price)
 
+def fitness_multi_repair(solution, solution_index):
+    w1 = 1.0
+    w2 = 1.0
+    w3 = 1.0
+    f1 = np.sum(solution * price) / np.sum(quantity_max * price)
+    f2 = np.sum(solution) / np.sum(quantity_max)
+    f3 = np.sum(solution * space) / space_max
 
-def make_feasible(ga, caller):
+    return w1*f1 + w2*f2 + w3*f3
+
+def fitness_single_death(solution, solution_index):
+    if np.sum(solution * space) > space_max:
+        return 0.0
+    return np.sum(solution * price)
+
+def fitness_single_penalty(solution, solution_index):
+    f1 = 1.0 / (np.abs(80000 - np.sum(solution*price)) + 0.00001)
+    f3 = 1.0 / (np.abs(space_max - np.sum(solution*space)) + 0.00001)
+    return 100*f1 + f3
+
+
+
+
+def repair(ga, caller):
 
     current_pop = None
 
@@ -42,14 +65,13 @@ def make_feasible(ga, caller):
                 if s[k] > 0 :
                     s[k] -= 1
 
-
 def on_start(ga):
-    make_feasible(ga,"START")
+    repair(ga,"START")
 
-def on_mutation(ga,e):
-    make_feasible(ga,"MUTATION")
+def on_mutation(ga, offspring):
+    repair(ga,"MUTATION")
 
-# ratio-greedy initial population
+# ratio-greedy solution
 price_mar = price/space
 ranking = sorted([[pm,qm,s,p,i] for pm,qm,s,p,i in zip(price_mar,quantity_max,space,price,id)],
                  key=lambda x:x[0], reverse=True)
@@ -78,7 +100,6 @@ for i in range(num_genes):
 print(init_sol, np.sum(init_sol*price), np.sum(init_sol*space))
 
 
-
 params = {
 
     "num_generations": 300,
@@ -102,14 +123,13 @@ params = {
     "save_best_solutions" : False,
     "save_solutions":False,
 
-    "fitness_func":fitness,
+    "fitness_func":fitness_multi_repair,
     "on_start":on_start,
     "on_mutation":on_mutation}
 
 
 ga = pygad.GA(**params)
 ga.run()
-
 
 best_sol, best_price, gen = ga.best_solution()
 print(best_sol, np.sum(best_sol*price), np.sum(best_sol*space), ga.best_solution_generation)
