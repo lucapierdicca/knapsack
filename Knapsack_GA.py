@@ -13,21 +13,19 @@ id = np.arange(num_genes)
 space = products[1:,1].astype(float)
 price = products[1:,2].astype(float)
 quantity_max = products[1:,3].astype(int)
-space_max = 1
 
 
 def fitness_single_repair(solution, solution_index):
     return np.sum(solution * price)
 
 def fitness_multi_repair(solution, solution_index):
-    w1 = 1.0
-    w2 = 1.0
-    w3 = 1.0
-    f1 = np.sum(solution * price) / np.sum(quantity_max * price)
-    f2 = np.sum(solution) / np.sum(quantity_max)
-    f3 = np.sum(solution * space) / space_max
-
-    return w1*f1 + w2*f2 + w3*f3
+    w1 = 5/7
+    w2 = 1/7
+    w3 = 1/7
+    f1 = (np.sum(quantity_max * price) - np.sum(solution * price)) / np.sum(quantity_max * price)
+    f2 = (np.sum(quantity_max) - np.sum(solution)) / np.sum(quantity_max)
+    f3 = (space_max - np.sum(solution * space)) / space_max
+    return  -(w1*f1 + w2*f2 + w3*f3)
 
 def fitness_single_death(solution, solution_index):
     if np.sum(solution * space) > space_max:
@@ -35,12 +33,10 @@ def fitness_single_death(solution, solution_index):
     return np.sum(solution * price)
 
 def fitness_single_penalty(solution, solution_index):
-    f1 = 1.0 / (np.abs(80000 - np.sum(solution*price)) + 0.00001)
-    f3 = 1.0 / (np.abs(space_max - np.sum(solution*space)) + 0.00001)
-    return 100*f1 + f3
-
-
-
+    w2 = 6.0
+    f1 = np.sum(solution * price) / np.sum(quantity_max * price)
+    f2 = np.abs(space_max - np.sum(solution * space)) / (np.sum(quantity_max * space) - space_max)
+    return f1 - (w2*f2)
 
 def repair(ga, caller):
 
@@ -51,19 +47,25 @@ def repair(ga, caller):
     elif caller == "MUTATION":
         current_pop = ga.last_generation_offspring_mutation
 
+    # for s in current_pop:
+    #     if random.random() >= 1.0:
+    #         gene_index = 0
+    #         while np.sum(s * space) > space_max:
+    #             if s[posidx_to_id_asc[gene_index]] > 0 :
+    #                 s[posidx_to_id_asc[gene_index]] -= 1
+    #             else:
+    #                 gene_index+=1
+    #     else:
+    #         while np.sum(s * space) > space_max:
+    #             gene_index = random.randint(0,len(s)-1)
+    #             if s[gene_index] > 0 :
+    #                 s[gene_index] -= 1
+
     for s in current_pop:
-        if random.random() >= 1.0:
-            k = 0
-            while np.sum(s * space) > space_max:
-                if s[id_to_pos_asc[k]] > 0 :
-                    s[id_to_pos_asc[k]] -= 1
-                else:
-                    k+=1
-        else:
-            while np.sum(s * space) > space_max:
-                k = random.randint(0,len(s)-1)
-                if s[k] > 0 :
-                    s[k] -= 1
+        while np.sum(s * space) > space_max:
+            gene_index = random.randint(0,len(s)-1)
+            if s[gene_index] > 0 :
+                s[gene_index] -= 1
 
 def on_start(ga):
     repair(ga,"START")
@@ -71,72 +73,99 @@ def on_start(ga):
 def on_mutation(ga, offspring):
     repair(ga,"MUTATION")
 
-# ratio-greedy solution
-price_mar = price/space
-ranking = sorted([[pm,qm,s,p,i] for pm,qm,s,p,i in zip(price_mar,quantity_max,space,price,id)],
-                 key=lambda x:x[0], reverse=True)
+def greedy_solution():
+    price_mar = price / space
+    ranking = sorted([[pm, i] for pm, i in zip(price_mar, id)], key=lambda x: x[0], reverse=True)
 
-id_to_pos_desc = {index:r[4] for index,r in enumerate(ranking)}
-id_to_pos_asc = {len(lbl)-1-key:value for key,value in id_to_pos_desc.items()}
+    posidx_to_id_desc = {index: r[1] for index, r in enumerate(ranking)}
+    #posidx_to_id_asc = {len(lbl) - 1 - key: value for key, value in posidx_to_id_desc.items()}
 
-greedy_q_max = np.array([r[1] for r in ranking])
-greedy_space = np.array([r[2] for r in ranking])
-greedy_price = np.array([r[3] for r in ranking])
-greedy_sol = np.zeros(num_genes, dtype=int)
+    gene_index = 0
+    greedy_sol = np.zeros(num_genes, dtype=int)
+    while np.sum(greedy_sol * space) <= space_max:
+        if greedy_sol[posidx_to_id_desc[gene_index]] < quantity_max[posidx_to_id_desc[gene_index]]:
+            greedy_sol[posidx_to_id_desc[gene_index]] += 1
+        else:
+            gene_index += 1
 
-gene_index = 0
-while np.sum(greedy_sol*greedy_space) < space_max:
-    if greedy_sol[gene_index] < greedy_q_max[gene_index]:
-        greedy_sol[gene_index]+=1
-    else:
-        gene_index+=1
+    greedy_sol[posidx_to_id_desc[gene_index]] -= 1
 
-greedy_sol[gene_index]-=1
+    return greedy_sol
 
-init_sol = np.zeros(num_genes, dtype=int)
-for i in range(num_genes):
-    init_sol[ranking[i][4]] = greedy_sol[i]
+n_run = 3
+spaces_max = [1.0, 2.0]
+fitness = [(fitness_single_repair,"fitness_single_repair", on_start, on_mutation),
+           (fitness_multi_repair, "fitness_multi_repair", on_start, on_mutation),
+           (fitness_single_death, "fitness_single_death", None, None),
+           (fitness_single_penalty, "fitness_single_penalty", None, None)]
 
-print(init_sol, np.sum(init_sol*price), np.sum(init_sol*space))
+fitness_data = {}
+
+for f in fitness:
+    for i in range(len(spaces_max)):
+
+        data = {"best_solution": [],
+                "best_solution_fitness": [],
+                "best_solution_price": [],
+                "best_solution_space": [],
+                "best_solution_generation": []}
+
+        space_max = spaces_max[i]
+
+        print(f[1], space_max)
+
+        # ratio-greedy solution
+        greedy_sol = greedy_solution()
+        print(greedy_sol, np.sum(greedy_sol*price), np.sum(greedy_sol*space))
+
+        data["space_max"] = space_max
+        data["ratio_greedy_solution"] = greedy_sol
+
+        # GA solution
+        for i in range(n_run):
+
+            # GA params
+            params = {
+                "num_generations": 300,
+                "num_parents_mating": 4,
+                "parent_selection_type": "sss",
+                "keep_parents": 1,
+                "initial_population": None,
+                "sol_per_pop": 10,
+                "num_genes": num_genes,
+                "gene_type": int,
+                "gene_space": [range(q + 1) for q in quantity_max],
+                "crossover_type": "two_points",
+                "mutation_type": "random",
+                "mutation_percent_genes": 10,
+
+                "fitness_func":f[0],
+                "on_start":f[2],
+                "on_mutation":f[3]}
 
 
-params = {
+            # init and start GA
+            ga = pygad.GA(**params)
+            ga.run()
 
-    "num_generations": 300,
+            # save run data
+            best_solution, best_solution_fitness, _ = ga.best_solution()
+            data["best_solution"].append(best_solution)
+            data["best_solution_fitness"].append(best_solution_fitness)
+            data["best_solution_price"].append(np.sum(best_solution*price))
+            data["best_solution_space"].append(np.sum(best_solution*space))
+            data["best_solution_generation"].append(ga.best_solution_generation)
 
-    "num_parents_mating": 4,
-    "parent_selection_type": "sss",
-    "keep_parents": 1,
-
-    "initial_population": None,
-    "sol_per_pop": 20,
-
-    "num_genes": num_genes,
-    "gene_type": int,
-    "gene_space": [range(q + 1) for q in quantity_max],
-
-    "crossover_type": "two_points",
-
-    "mutation_type": "random",
-    "mutation_percent_genes": 10,
-
-    "save_best_solutions" : False,
-    "save_solutions":False,
-
-    "fitness_func":fitness_multi_repair,
-    "on_start":on_start,
-    "on_mutation":on_mutation}
+        if f[1] not in fitness_data:
+            fitness_data[f[1]] = [data]
+        else:
+            fitness_data[f[1]].append(data)
 
 
-ga = pygad.GA(**params)
-ga.run()
 
-best_sol, best_price, gen = ga.best_solution()
-print(best_sol, np.sum(best_sol*price), np.sum(best_sol*space), ga.best_solution_generation)
-for s,f in zip(ga.best_solutions, ga.best_solutions_fitness):
-    print(s,f)
+# plot run data
 
+pprint(fitness_data)
 
-# ga.plot_fitness()
 
 
